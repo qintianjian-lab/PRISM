@@ -1,6 +1,7 @@
 # PRISM: Photometric Redshift Estimation via Image and Photometry with Spectra-guided Gaussian Mixture Density Framework
 
 <div align="center">
+
 ![Static Badge](https://img.shields.io/badge/DOI-In_prep.-green?style=flat-square) ![Static Badge](https://img.shields.io/badge/Powered%20by-PyTorch%20Lightning-792ee5?style=flat-square&link=https%3A%2F%2Flightning.ai%2Fdocs%2Fpytorch%2Fstable%2F)
 
 </div>

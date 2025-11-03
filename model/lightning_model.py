@@ -7,7 +7,7 @@ from model.loss import (
     delta_z,
     nmad_z,
     sigma_n,
-    outline_fraction,
+    outlier_fraction,
     z_estimate,
     SpectraReconstructionLoss,
     PhotoReconstructionLoss,
@@ -134,7 +134,7 @@ class BuildLightningModel(lightning.LightningModule):
             ("nmad_z", nmad_z(_d_z, factor=1.4826)),
             ("sigma_0.05", sigma_n(_d_z, n=0.05)),
             ("sigma_0.15", sigma_n(_d_z, n=0.15)),
-            ("outline_fraction", outline_fraction(_d_z, threshold=0.1)),
+            ("outline_fraction", outlier_fraction(_d_z, threshold=0.1)),
         ]
         for metric_name, metric_value in metrics:
             key = f"{prefix}_{metric_name}_{suffix}"

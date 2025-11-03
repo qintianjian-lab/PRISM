@@ -80,7 +80,7 @@ def sigma_n(
     return torch.sum(mask) / len(d_z)
 
 
-def outline_fraction(
+def outlier_fraction(
     d_z: torch.Tensor,
     threshold: float = 0.1,
 ) -> torch.Tensor:

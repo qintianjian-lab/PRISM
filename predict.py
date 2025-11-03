@@ -12,7 +12,7 @@ from tqdm.rich import tqdm
 from config.config import config
 from dataloader.dataloader import build_dataloader
 from model.lightning_model import BuildLightningModel
-from model.loss import delta_z, nmad_z, sigma_n, z_estimate, outline_fraction
+from model.loss import delta_z, nmad_z, sigma_n, z_estimate, outlier_fraction
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -548,7 +548,7 @@ def inference(
         d_z=d_z_epoch,
         n=0.15,
     ).item()
-    outline_frac = outline_fraction(
+    outline_frac = outlier_fraction(
         d_z=d_z_epoch,
         threshold=0.1,
     ).item()

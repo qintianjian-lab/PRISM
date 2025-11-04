@@ -1,4 +1,4 @@
-# PRISM: Photometric Redshift Estimation via Image and Photometry with Spectra-guided Gaussian Mixture Density Framework
+# PRISM: Photometric Redshift Estimation via Image and Photometry with Spectrum-guided Gaussian Mixture Density Framework
 
 <div align="center">
 

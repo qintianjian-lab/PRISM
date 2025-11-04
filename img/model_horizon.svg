@@ -508,12 +508,12 @@
 			</g>
 			<g id="shape437-165" v:mID="437" v:groupContext="shape" transform="translate(816.51,795.25) rotate(90) scale(-1,1)">
 				<title>工作表.437</title>
-				<desc>Spectra-guided Supervision</desc>
+				<desc>Spectrum-guided Supervision</desc>
 				<v:textBlock v:margins="rect(4,4,4,4)" v:tabSpace="42.5197"/>
 				<v:textRect cx="64.4882" cy="789.913" width="128.98" height="39.0205" transform="rotate(180)"/>
 				<rect x="0" y="770.403" width="128.976" height="39.0205" class="st13"/>
-				<text x="10.61" y="-793.97" transform="scale(1,-1)" class="st27" v:langID="1033"><v:paragraph v:spLine="-1.16"
-							v:spAfter="8" v:horizAlign="1" v:bulletSize="0.166667"/><v:tabList/>Spectra-guided <tspan x="22.15"
+				<text x="6.76" y="-793.97" transform="scale(1,-1)" class="st27" v:langID="1033"><v:paragraph v:spLine="-1.16"
+							v:spAfter="8" v:horizAlign="1" v:bulletSize="0.166667"/><v:tabList/>Spectrum-guided <tspan x="22.15"
 							dy="1.16em" class="st5">Supervision</tspan></text>			</g>
 			<g id="shape438-169" v:mID="438" v:groupContext="shape" transform="translate(861.283,795.342) rotate(90) scale(-1,1)">
 				<title>工作表.438</title>

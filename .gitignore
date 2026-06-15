@@ -198,3 +198,10 @@ debug.py
 results/
 weights/
 *.ipynb
+PDF/
+sweep/
+redshift_distribution/
+feature_compare_results/
+
+.codex
+.claude

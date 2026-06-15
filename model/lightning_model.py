@@ -1,18 +1,19 @@
+import bitsandbytes as bnb
 import lightning
 import torch
-from timm import optim
 
 from model.loss import (
     NLLLoss,
     delta_z,
     nmad_z,
+    z_bias,
     sigma_n,
     outlier_fraction,
     z_estimate,
-    SpectraReconstructionLoss,
-    PhotoReconstructionLoss,
+    CosineSimilarityLoss,
 )
 from model.modules import BuildModel
+from model.sscnn import SSCNNEncoder
 
 
 class BuildLightningModel(lightning.LightningModule):
@@ -23,65 +24,91 @@ class BuildLightningModel(lightning.LightningModule):
         eps: float | int,
         # hyper params
         learn_rate: float,
+        weight_decay: float,
         cos_annealing_t_0: int,
         cos_annealing_t_mult: int,
         cos_annealing_eta_min: float,
         dropout: float,
-        weight_decay: float,
         # photometric & mags settings
         photo_in_channel: int,
         photo_in_dim: int,
         mag_in_channel: int,
         mag_in_dim: int,
+        blk_count: list[int],
+        hidden_channels: list[int],
+        num_heads: list[int],
         out_channel: int,
         # spectrum settings
         spectrum_extractor_config: dict,
         enable_spectrum_auxiliary: bool,
-        # PyTorch2.0 settings
-        enable_torch_2: bool = False,
+        # loss weights (all weights live here; nothing is hardcoded below)
+        loss_config: dict,
+        # sweep objective settings
+        sweep_outlier_max: float,
     ):
         super().__init__()
         print("[INFO] Using Random Seed: ", random_seed)
-        self.model = (
-            BuildModel(
-                photo_in_channel=photo_in_channel,
-                photo_in_dim=photo_in_dim,
-                mag_in_channel=mag_in_channel,
-                mag_in_dim=mag_in_dim,
-                out_channel=out_channel,
-                dropout=dropout,
-                enable_spectrum=enable_spectrum_auxiliary,
-                spectrum_extractor_config=spectrum_extractor_config,
-                eps=eps,
-            )
-            if not enable_torch_2
-            else torch.compile(
-                model=BuildModel(
-                    photo_in_channel=photo_in_channel,
-                    photo_in_dim=photo_in_dim,
-                    mag_in_channel=mag_in_channel,
-                    mag_in_dim=mag_in_dim,
-                    out_channel=out_channel,
-                    dropout=dropout,
-                    enable_spectrum=enable_spectrum_auxiliary,
-                    spectrum_extractor_config=spectrum_extractor_config,
-                    eps=eps,
-                ),
-                backend="inductor",
-            )
+        self.model = BuildModel(
+            photo_in_channel=photo_in_channel,
+            photo_in_dim=photo_in_dim,
+            mag_in_channel=mag_in_channel,
+            mag_in_dim=mag_in_dim,
+            out_channel=out_channel,
+            blk_count=blk_count,
+            hidden_channels=hidden_channels,
+            num_heads=num_heads,
+            dropout=dropout,
+            enable_spectrum=enable_spectrum_auxiliary,
+            spectrum_extractor_config=spectrum_extractor_config,
+            eps=eps,
         )
-        if enable_torch_2:
-            print("[INFO] Using PyTorch 2.0 compile")
+
         self.learn_rate = learn_rate
+        self.weight_decay = weight_decay
+
         self.cos_annealing_t_0 = cos_annealing_t_0
         self.cos_annealing_t_mult = cos_annealing_t_mult
         self.cos_annealing_eta_min = cos_annealing_eta_min
-        self.weight_decay = weight_decay
-        self.estimation_loss = NLLLoss(temperature=2.5, eps=eps)
-        self.sr_loss = PhotoReconstructionLoss(photo_size=photo_in_dim)
-        self.contrastive_loss = SpectraReconstructionLoss(eps=eps)
-        self.contrastive_loss_weight_foreach_layer = [0.2, 0.4, 0.8, 1.0]
+
+        self.estimation_loss_temperature = loss_config["nll_loss_temperature"]
+        self.estimation_loss = NLLLoss(
+            temperature=self.estimation_loss_temperature, eps=eps
+        )
+        self.w_align = loss_config["w_align"]
+        self.contrastive_loss = CosineSimilarityLoss(
+            eps=eps,
+        )
+
         self.enable_spectrum_auxiliary = enable_spectrum_auxiliary
+        self.sweep_outlier_max = float(sweep_outlier_max)
+        if enable_spectrum_auxiliary:
+            _embedding_dim = spectrum_extractor_config["spectrum_embedding_dim"]
+            ckpt_path = spectrum_extractor_config["spectrum_pretrained_ckpt_path"]
+            self.spectrum_encoder = SSCNNEncoder(
+                in_channel=spectrum_extractor_config["spectrum_channel"],
+                spectrum_size=spectrum_extractor_config["spectrum_size"],
+                embedding_dim=_embedding_dim,
+                pretrained_ckpt_path=ckpt_path,
+            )
+            assert (
+                ckpt_path != ""
+            ), "spectrum_pretrained_ckpt_path must be provided when enable_spectrum_auxiliary is True!"
+            self.spectrum_encoder.requires_grad_(False)
+            self.spectrum_encoder.eval()
+            print("[INFO] Spectrum encoder is loaded and frozen for alignment.")
+            self.spectral_supervised_layers = spectrum_extractor_config[
+                "spectral_supervised_layers"
+            ]
+            self.spectral_layer_weights = spectrum_extractor_config[
+                "spectral_layer_weights"
+            ]
+            print(
+                "[INFO] w_align={}, nll_temp={}, supervised_layers={}".format(
+                    self.w_align,
+                    loss_config["nll_loss_temperature"],
+                    self.spectral_supervised_layers,
+                )
+            )
 
         self.val_loss = torch.zeros(1).to(self.device)
         self.val_label = []
@@ -89,7 +116,8 @@ class BuildLightningModel(lightning.LightningModule):
         self.val_loss_epoch = 0.0
         self.best_val_loss = 9e10
         self.best_val_mae_epoch = 9e10
-        self.best_val_outline_fraction_epoch = 1.0
+        self.best_val_outlier_fraction_epoch = 1.0
+        self.best_val_sweep_score_epoch = 9e10
 
         self.test_label = []
         self.test_pred = []
@@ -132,9 +160,10 @@ class BuildLightningModel(lightning.LightningModule):
         )
         metrics = [
             ("nmad_z", nmad_z(_d_z, factor=1.4826)),
+            ("z_bias", z_bias(_d_z)),
             ("sigma_0.05", sigma_n(_d_z, n=0.05)),
             ("sigma_0.15", sigma_n(_d_z, n=0.15)),
-            ("outline_fraction", outlier_fraction(_d_z, threshold=0.1)),
+            ("outlier_fraction", outlier_fraction(_d_z, threshold=0.1)),
         ]
         for metric_name, metric_value in metrics:
             key = f"{prefix}_{metric_name}_{suffix}"
@@ -168,7 +197,6 @@ class BuildLightningModel(lightning.LightningModule):
         return _estimation_loss
 
     def training_step(self, batch, batch_idx):
-        _contrastive_loss = None
         (
             id,
             ra,
@@ -176,51 +204,37 @@ class BuildLightningModel(lightning.LightningModule):
             photometric,
             mags,
             label,
-            wavelength,
             flux,
+            south_north_flag,
         ) = batch
         if self.enable_spectrum_auxiliary:
-            (
-                pred,
-                spectrum_features,
-                sr_features,
-                deep_features,
-                photometric_features,
-            ) = self.model(
+            pred, spectrum_features, _ = self.model(
                 photometric=photometric,
                 magnitudes=mags,
                 output_spectrum=True,
             )
-            _contrastive_loss = torch.tensor(0.0, device=self.device)
-            for _index, _spec_feature in enumerate(spectrum_features):
-                _deep_contrastive_loss = self.contrastive_loss(
-                    _spec_feature,
-                    flux,
+            spec_emb, _ = self.spectrum_encoder(flux)
+
+            _align_loss = torch.tensor(0.0, device=self.device)
+            for local_idx, layer_idx in enumerate(self.spectral_supervised_layers):
+                w = self.spectral_layer_weights[local_idx]
+                photo_emb = spectrum_features[layer_idx]
+                _layer_align_loss = self.contrastive_loss(
+                    photo_emb,
+                    spec_emb.detach(),
                 )
                 self.log(
-                    f"train_deep_contrastive_loss_{_index + 1}",
-                    _deep_contrastive_loss,
+                    f"train_deep_contrastive_loss_{layer_idx + 1}",
+                    _layer_align_loss,
                     prog_bar=True,
                     on_step=True,
                 )
-                _contrastive_loss += (
-                    _deep_contrastive_loss
-                    * self.contrastive_loss_weight_foreach_layer[_index]
-                )
+                _align_loss = _align_loss + w * _layer_align_loss
             self.log(
-                "train_contrastive_loss_avg",
-                _contrastive_loss,
-                prog_bar=True,
-                on_step=True,
+                "train_contrastive_loss_avg", _align_loss, prog_bar=True, on_step=True
             )
         else:
-            (
-                pred,
-                spectrum_features,
-                sr_features,
-                deep_features,
-                photometric_features,
-            ) = self.model(
+            pred, _, _ = self.model(
                 photometric=photometric,
                 magnitudes=mags,
                 output_spectrum=False,
@@ -236,21 +250,13 @@ class BuildLightningModel(lightning.LightningModule):
             prog_bar=True,
             on_step=True,
         )
-        _sr_loss = self.sr_loss(sr_features, photometric)
-        self.log(
-            "train_sr_loss",
-            _sr_loss,
-            prog_bar=True,
-            on_step=True,
-        )
-        _estimation_loss = 0.81 * _estimation_loss + 0.19 * (10 * _sr_loss)
         self._log_eval_metrics(
             "train",
             label=label.detach().cpu(),
             pred=pred.detach().cpu(),
         )
         if self.enable_spectrum_auxiliary:
-            return 0.5 * _estimation_loss + 0.5 * _contrastive_loss
+            return (1 - self.w_align) * _estimation_loss + self.w_align * _align_loss
         else:
             return _estimation_loss
 
@@ -269,16 +275,10 @@ class BuildLightningModel(lightning.LightningModule):
             photometric,
             mags,
             label,
-            wavelength,
             flux,
+            south_north_flag,
         ) = batch
-        (
-            pred,
-            spectrum_features,
-            sr_features,
-            deep_features,
-            photometric_features,
-        ) = self.model(
+        pred, _, _ = self.model(
             photometric=photometric,
             magnitudes=mags,
             output_spectrum=False,
@@ -316,24 +316,37 @@ class BuildLightningModel(lightning.LightningModule):
             label=self.val_label,
             pred=self.val_pred,
         )
-        if val_metrics["val_mae_epoch"] < self.best_val_mae_epoch:
-            self.best_val_mae_epoch = val_metrics["val_mae_epoch"]
+        val_mae = float(val_metrics["val_mae_epoch"])
+        val_outlier_fraction = float(val_metrics["val_outlier_fraction_epoch"])
+        outlier_excess = max(0.0, val_outlier_fraction - self.sweep_outlier_max)
+        val_sweep_score = val_mae + 0.2 * val_outlier_fraction + 1.0 * outlier_excess
+        self.log(
+            "val_sweep_score_epoch",
+            val_sweep_score,
+            prog_bar=True,
+            on_epoch=True,
+        )
+        if val_sweep_score < self.best_val_sweep_score_epoch:
+            self.best_val_sweep_score_epoch = val_sweep_score
+            self.log(
+                "best_val_sweep_score_epoch",
+                self.best_val_sweep_score_epoch,
+                prog_bar=True,
+                on_epoch=True,
+            )
+        if val_mae < self.best_val_mae_epoch:
+            self.best_val_mae_epoch = val_mae
             self.log(
                 "best_val_mae_epoch",
                 self.best_val_mae_epoch,
                 prog_bar=True,
                 on_epoch=True,
             )
-        if (
-            val_metrics["val_outline_fraction_epoch"]
-            < self.best_val_outline_fraction_epoch
-        ):
-            self.best_val_outline_fraction_epoch = val_metrics[
-                "val_outline_fraction_epoch"
-            ]
+        if val_outlier_fraction < self.best_val_outlier_fraction_epoch:
+            self.best_val_outlier_fraction_epoch = val_outlier_fraction
             self.log(
-                "best_val_outline_fraction_epoch",
-                self.best_val_outline_fraction_epoch,
+                "best_val_outlier_fraction_epoch",
+                self.best_val_outlier_fraction_epoch,
                 prog_bar=True,
                 on_epoch=True,
             )
@@ -346,16 +359,10 @@ class BuildLightningModel(lightning.LightningModule):
             photometric,
             mags,
             label,
-            wavelength,
             flux,
+            south_north_flag,
         ) = batch
-        (
-            pred,
-            spectrum_features,
-            sr_features,
-            deep_features,
-            photometric_features,
-        ) = self.model(
+        pred, _, _ = self.model(
             photometric=photometric,
             magnitudes=mags,
             output_spectrum=False,
@@ -377,13 +384,13 @@ class BuildLightningModel(lightning.LightningModule):
         )
 
     def configure_optimizers(self):
-        optimizer = optim.create_optimizer_v2(
-            self.model,
-            opt="lion",
+        optimizer = bnb.optim.PagedAdamW8bit(
+            self.model.parameters(),
             lr=self.learn_rate,
-            eps=self.eps,
             weight_decay=self.weight_decay,
+            betas=(0.9, 0.999),
         )
+
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer,
             T_0=self.cos_annealing_t_0,

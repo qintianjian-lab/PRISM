@@ -51,6 +51,17 @@ def delta_z(
     return (pred_z - label) / (1 + label)
 
 
+def z_bias(
+    d_z: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Calculate the bias of the redshift estimation.
+    :param d_z: predictions, shape like (all,1)
+    :return: Mean(delta_z), shape like (1)
+    """
+    return d_z.mean()
+
+
 def nmad_z(
     d_z: torch.Tensor,
     factor: float = 1.4826,
@@ -85,10 +96,10 @@ def outlier_fraction(
     threshold: float = 0.1,
 ) -> torch.Tensor:
     """
-    Outline fraction metric
+    Outlier fraction metric
     :param d_z: predictions, shape like (all,1)
-    :param threshold: threshold for the outline fraction metric, default is 0.1
-    :return: Outline fraction, shape like (1), smaller is better
+    :param threshold: threshold for the outlier fraction metric, default is 0.1
+    :return: Outlier fraction, shape like (1), smaller is better
     """
     d_z = d_z.abs()
     mask = d_z >= threshold
@@ -109,6 +120,8 @@ class NLLLoss(nn.Module):
     def forward(
         self, pred: torch.Tensor, label: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        assert torch.isnan(pred).sum() == 0, "Prediction contains NaN"
+
         mean = pred[:, :, 0]
         std = f.softplus(pred[:, :, 1]) + self.eps
         log_weight = f.log_softmax(pred[:, :, 2] / self.temperature, dim=1)
@@ -124,7 +137,7 @@ class NLLLoss(nn.Module):
         return -torch.mean(log_mixture_likelihood), torch.exp(log_weight)
 
 
-class CosineSimilarityLoss(nn.Module):
+class PITModule(nn.Module):
 
     def __init__(
         self,
@@ -132,56 +145,48 @@ class CosineSimilarityLoss(nn.Module):
     ):
         super().__init__()
         self.eps = eps
-
-    def forward(self, feature_a: torch.Tensor, feature_b: torch.Tensor) -> torch.Tensor:
-        b, c, d = feature_a.shape
-        feature_a = feature_a.reshape(b, -1)
-        feature_b = feature_b.reshape(b, -1)
-        similarity = f.cosine_similarity(feature_a, feature_b, dim=1, eps=self.eps)
-        return (1 - similarity).mean()
-
-
-class SpectraReconstructionLoss(nn.Module):
-
-    def __init__(
-        self,
-        cosine_loss_weight: float = 0.6,
-        mae_loss_weight: float = 0.4,
-        eps: float = 1e-8,
-    ):
-        super().__init__()
-        self.cosine_loss = CosineSimilarityLoss(eps=eps)
-        self.mae_loss = nn.L1Loss()
-        self.cosine_loss_weight = cosine_loss_weight
-        self.mae_loss_weight = mae_loss_weight
-        self.eps = eps
-
-    def forward(self, feature_a: torch.Tensor, feature_b: torch.Tensor) -> torch.Tensor:
-        loss_cosine = self.cosine_loss(feature_a, feature_b)
-        loss_mae = self.mae_loss(feature_a, feature_b)
-        return self.cosine_loss_weight * loss_cosine + self.mae_loss_weight * loss_mae
-
-
-class PhotoReconstructionLoss(nn.Module):
-
-    def __init__(
-        self,
-        photo_size: int,
-    ):
-        super().__init__()
-        self.photo_size = photo_size
-        self.mask = self._create_gaussian_mask().unsqueeze(0)
+        self.standard_normal = torch.distributions.Normal(0.0, 1.0)
 
     def forward(self, pred: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
-        diff = torch.abs(pred - label) * self.mask.to(pred.device)
-        return torch.mean(diff)
+        mean = pred[:, :, 0]  # (B, N)
+        std = f.softplus(pred[:, :, 1]) + self.eps  # (B, N)
+        weights = f.softmax(pred, dim=-1)  # (B, N)
+        if label.dim() == 1:
+            label = label.unsqueeze(-1)  # (B, 1)
+        z = (label - mean) / std  # (B, N)
+        cdf = self.standard_normal.cdf(z)  # (B, N)
+        pit = torch.sum(weights * cdf, dim=-1)  # (B,)
+        return pit
 
-    def _create_gaussian_mask(self):
-        y_coords, x_coords = torch.meshgrid(
-            torch.arange(self.photo_size, dtype=torch.float32),
-            torch.arange(self.photo_size, dtype=torch.float32),
-        )
-        center = (self.photo_size - 1) / 2.0
-        dist_sq_from_center = (y_coords - center) ** 2 + (x_coords - center) ** 2
-        mask = torch.exp(-dist_sq_from_center / (2 * (self.photo_size / 6.0) ** 2))
-        return mask.unsqueeze(0)  # (1, H, W)
+
+class CosineSimilarityLoss(nn.Module):
+    """
+    Cosine similarity alignment loss.
+    """
+
+    def __init__(
+        self,
+        eps: float = 1e-8,
+    ):
+        """
+        :param eps: Numerical stability constant.
+        """
+        super().__init__()
+        self.eps = eps
+
+    def forward(
+        self,
+        photo_emb: torch.Tensor,
+        spec_emb: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        :param photo_emb: (B, D) photometric projection embedding.
+        :param spec_emb:  (B, D) spectral encoder embedding (frozen).
+        :return: scalar cosine similarity loss.
+        """
+        assert (
+            photo_emb.shape == spec_emb.shape
+        ), "photo_emb and spec_emb must have the same shape"
+
+        similarity = f.cosine_similarity(photo_emb, spec_emb, dim=1, eps=self.eps)
+        return (1.0 - similarity).mean()

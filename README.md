@@ -186,16 +186,6 @@ python summary.py
 
 This runs `torchinfo.summary` with the current configuration.
 
-## Pretrained Checkpoints
-
-This repository includes fold-specific checkpoint paths for:
-
-- PRISM model weights in `weights/`;
-- frozen SSCNN spectrum encoder weights in `sscnn_weight/`.
-
-If you retrain the model or move checkpoints, update `PRED_CONFIG` in `predict.py` and `spectrum_pretrained_ckpt_dir` in
-`config/config.py` accordingly.
-
 ## Citation
 
 ```bibtex

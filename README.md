@@ -22,7 +22,7 @@ incorporates advanced feature-extraction methods, along with structural adaptati
 employs a spectra-guided supervised training scheme to help the model learn feature representations associated with
 spectral data. The framework adopts a Gaussian mixture density module as the regressor, producing a probability density
 function for the photometric redshift rather than a deterministic point estimate. We constructed a galaxy redshift
-dataset containing 198 million samples from the Dark Energy Spectroscopic Instrument Data Release 1 and performed
+dataset containing 1.98 million samples from the Dark Energy Spectroscopic Instrument Data Release 1 and performed
 five-fold cross-validation experiments on it. Compared with the best-performing baseline model, PRISM reduced the mean
 absolute error and outlier fraction by 17.1% and 20.0%, respectively.
 

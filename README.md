@@ -2,6 +2,7 @@
 
 <div align="center">
 
+![Static Badge](https://img.shields.io/badge/10.1088%2F1538-3873%2Faeb072?label=doi&link=https%3A%2F%2Fdoi.org%2F10.1088%2F1538-3873%2Faeb072)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c)
 ![Lightning](https://img.shields.io/badge/PyTorch%20Lightning-2.x-792ee5)
@@ -9,22 +10,7 @@
 
 </div>
 
-Galaxy photometric redshifts play an important role in cosmology and in studies of the cosmic large-scale structure.
-Next-generation surveys will produce tens of billions of observations, creating a strong need for redshift estimation
-methods that are both accurate and computationally efficient. However, template-fitting or machine-learning-based
-photometric redshift estimators commonly used in astronomy often either lack sufficient accuracy or fail to meet the
-throughput requirements imposed by massive datasets. Moreover, because photometric images and photometry data differ
-from natural images in their features and structure, feature extractors that perform well on natural-image tasks tend to
-underperform when transferred directly to photometric redshift estimation. To address these challenges, we propose
-PRISM (Photometric Redshift Estimation via a Spectrum-guided Gaussian Mixture Density Framework), a multimodal framework
-that combines a photometric-image modality, composed of multi-band images, with a photometry-data modality. PRISM
-incorporates advanced feature-extraction methods, along with structural adaptations tailored to astronomical data, and
-employs a spectra-guided supervised training scheme to help the model learn feature representations associated with
-spectral data. The framework adopts a Gaussian mixture density module as the regressor, producing a probability density
-function for the photometric redshift rather than a deterministic point estimate. We constructed a galaxy redshift
-dataset containing 1.98 million samples from the Dark Energy Spectroscopic Instrument Data Release 1 and performed
-five-fold cross-validation experiments on it. Compared with the best-performing baseline model, PRISM reduced the mean
-absolute error and outlier fraction by 17.1% and 20.0%, respectively.
+Accurate and computationally efficient photometric redshift estimation is essential for cosmological analyses and studies of the large-scale structure of the Universe. However, applying existing template-fitting and machine learning methods to rapidly growing survey data sets can involve trade-offs between predictive performance and computational throughput. Moreover, feature extractors developed for natural images may not be well suited to the sparse, source-centered, and multiband characteristics of galaxy images. We present PRISM (Photometric Redshift Estimation via a Spectra-guided Gaussian Mixture Density Framework), a multimodal framework that jointly exploits multiband image cutouts and catalog-level photometric measurements. PRISM incorporates feature-extraction modules tailored to source-centered astronomical images and a dedicated fusion module that captures complementary information from the imaging and tabular modalities. During training, a frozen spectral encoder provides an auxiliary representation-alignment objective, encouraging selected photometric features to retain information associated with galaxy spectra without requiring spectroscopic data at inference time. A Gaussian-mixture density head models the conditional redshift distribution, enabling PRISM to produce a full predictive probability density function in addition to a point estimate. We evaluated PRISM through five-fold cross-validation on 1.98 million galaxies constructed from the Dark Energy Spectroscopic Instrument Data Release 1 and the DESI Legacy Imaging Surveys. Within this benchmark, PRISM reduces the mean absolute error and catastrophic-outlier fraction by 17.1% and 20.0%, respectively, relative to the best baseline value for each metric. Our PRISM ablations showed that combining multiband images with catalog flux measurements improved predictive performance relative to either input alone. Spectra-guided supervision provided a smaller additional gain in the full multimodal configuration.
 
 ![PRISM architecture](img/model.png)
 
@@ -189,5 +175,17 @@ This runs `torchinfo.summary` with the current configuration.
 ## Citation
 
 ```bibtex
-# In prep.
+@article{He_2026,
+doi = {10.1088/1538-3873/aeb072},
+url = {https://doi.org/10.1088/1538-3873/aeb072},
+year = {2026},
+month = {oct},
+publisher = {The Astronomical Society of the Pacific},
+volume = {138},
+number = {10},
+pages = {104506},
+author = {He, Yuchen and Wu, Jingjing and Jiang, Bin and Zhang, Yanxia},
+title = {Photometric Redshift Estimation via a Spectra-guided Gaussian Mixture Density Framework},
+journal = {Publications of the Astronomical Society of the Pacific},
+}
 ```

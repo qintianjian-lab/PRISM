@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![DOI](https://img.shields.io/badge/DOI-10.1088%2F1538--3873%2Faeb072)](https://doi.org/10.1088/1538-3873/aeb072)
+[![DOI](https://img.shields.io/badge/DOI-10.1088%2F1538--3873%2Faeb072-green)](https://doi.org/10.1088/1538-3873/aeb072)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c)
 ![Lightning](https://img.shields.io/badge/PyTorch%20Lightning-2.x-792ee5)
